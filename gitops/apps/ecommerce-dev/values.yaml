@@ -18,11 +18,11 @@
 # Starting values are placeholders; the pipeline overwrites them on first run.
 api:
   image:
-    tag: dev-latest # bumped by CI to $(Build.BuildId) (or short git SHA) on every merge to main
+    tag: latest # matches what was manually pushed to Docker Hub for this local lab
 
 web:
   image:
-    tag: dev-latest # bumped by CI to $(Build.BuildId) (or short git SHA) on every merge to main
+    tag: latest # matches what was manually pushed to Docker Hub for this local lab
 
 # Example of a genuinely environment-specific (not CI-managed) override that
 # could live here too — dev typically runs with a single replica to save cost:

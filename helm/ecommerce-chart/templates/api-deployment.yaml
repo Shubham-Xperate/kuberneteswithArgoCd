@@ -31,6 +31,10 @@ spec:
       # inside the container as a stepping stone to a node/cluster breakout.
       securityContext:
         runAsNonRoot: true
+        # Matches the numeric UID/GID the image's appuser is created with
+        # (backend/Dockerfile).
+        runAsUser: 999
+        runAsGroup: 999
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"

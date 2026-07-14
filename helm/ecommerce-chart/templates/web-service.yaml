@@ -17,5 +17,5 @@ spec:
     {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "web") | nindent 4 }}
   ports:
     - port: {{ .Values.web.service.port }}
-      targetPort: 80
+      targetPort: 8080
       name: http

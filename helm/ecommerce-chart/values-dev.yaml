@@ -9,7 +9,8 @@ aspnetEnvironment: Development
 
 api:
   image:
-    tag: dev # floating tag matching whatever your local build/push loop produces
+    repository: shubhamxperate/ecommerce-api # Docker Hub, not ACR, for this local lab
+    tag: dev # floating tag matching whatever your local build/push loop produces -- overridden by gitops/apps/ecommerce-dev/values.yaml
   replicaCount: 1 # one pod is enough to prove it works on a laptop
   resources:
     requests:
@@ -21,6 +22,7 @@ api:
 
 web:
   image:
+    repository: shubhamxperate/ecommerce-web # Docker Hub, not ACR, for this local lab
     tag: dev
   replicaCount: 1
   resources:
