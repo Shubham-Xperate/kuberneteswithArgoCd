@@ -22,7 +22,7 @@ api:
 
 web:
   image:
-    tag: latest # matches what was manually pushed to Docker Hub for this local lab
+    tag: v2 # catalog page copy change
 
 # Example of a genuinely environment-specific (not CI-managed) override that
 # could live here too — dev typically runs with a single replica to save cost:
