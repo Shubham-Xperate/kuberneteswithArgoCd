@@ -33,7 +33,7 @@ spec:
   project: ecommerce
 
   sources:
-    - repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+    - repoURL: "https://github.com/Shubham-Xperate/kuberneteswithArgoCd.git"
       targetRevision: main
       path: helm/ecommerce-chart
       helm:
@@ -41,7 +41,7 @@ spec:
           - values-prod.yaml
           - $values/gitops/apps/ecommerce-prod/values.yaml
 
-    - repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+    - repoURL: "https://github.com/Shubham-Xperate/kuberneteswithArgoCd.git"
       targetRevision: main
       ref: values
 

@@ -34,7 +34,7 @@ spec:
   sources:
     # Entry 1: the Helm chart itself (templates, Chart.yaml, default values.yaml,
     # values-dev.yaml — all owned by the app-source repo).
-    - repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+    - repoURL: "https://github.com/Shubham-Xperate/kuberneteswithArgoCd.git"
       targetRevision: main
       path: helm/ecommerce-chart
       helm:
@@ -52,7 +52,7 @@ spec:
     # into it via $values above. This entry contributes no Helm chart itself
     # — it's checked out purely so its files (the values.yaml) are available
     # on disk for entry 1 to reference.
-    - repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+    - repoURL: "https://github.com/Shubham-Xperate/kuberneteswithArgoCd.git"
       targetRevision: main
       ref: values
 

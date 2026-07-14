@@ -31,7 +31,7 @@ spec:
   # your actual repo URL (the same repo that contains helm/ and gitops/, per
   # this lab's simplification of colocating the "app" and "gitops" repos).
   sourceRepos:
-    - "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+    - "https://github.com/Shubham-Xperate/kuberneteswithArgoCd.git"
     # If you split gitops/ out into a truly separate repo (see gitops/README.md),
     # add its URL here too, e.g.:
     # - "https://dev.azure.com/your-org/ecommerce-gitops/_git/ecommerce-gitops"

@@ -29,7 +29,7 @@ spec:
 
   source:
     # Same repo placeholder as argocd/project.yaml — replace with your real URL.
-    repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+    repoURL: "https://github.com/Shubham-Xperate/kuberneteswithArgoCd.git"
     targetRevision: main
     path: argocd/apps
 
