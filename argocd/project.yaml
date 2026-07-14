@@ -43,6 +43,13 @@ spec:
   destinations:
     - server: "https://kubernetes.default.svc"
       namespace: ecommerce
+    # The root "app of apps" Application itself (root-app.yaml) targets the
+    # argocd namespace, not ecommerce -- its whole job is creating more
+    # Application resources (ecommerce-dev, ecommerce-prod), which live
+    # alongside ArgoCD's own control plane, not inside the app's namespace.
+    # Without this entry, the AppProject rejects that destination outright.
+    - server: "https://kubernetes.default.svc"
+      namespace: argocd
 
   # Whitelist of cluster-scoped resource kinds this project's Applications
   # may manage. Left empty/omitted here on purpose: this project only ever
