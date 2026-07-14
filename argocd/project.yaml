@@ -52,13 +52,18 @@ spec:
       namespace: argocd
 
   # Whitelist of cluster-scoped resource kinds this project's Applications
-  # may manage. Left empty/omitted here on purpose: this project only ever
-  # touches namespaced resources (Deployments, Services, Ingresses, etc. —
-  # all allowed by default at the namespace scope), so we do not need to
-  # grant any cluster-scoped kinds. This keeps the blast radius of a
-  # compromised or misconfigured Application limited to the "ecommerce"
-  # namespace.
-  clusterResourceWhitelist: []
+  # may manage. Kept minimal on purpose to limit blast radius -- Namespace is
+  # the ONE exception, and it's required, not optional: syncOptions:
+  # CreateNamespace=true still performs a real Namespace apply as a PreSync
+  # step, and that apply is checked against this whitelist like any other
+  # resource (confirmed by observed ArgoCD behavior -- it is NOT bypassed as
+  # a "special case" the way earlier comments in this repo assumed). Without
+  # this entry, every sync fails at PreSync with "resource :Namespace is not
+  # permitted in project ecommerce", even though nothing else in this chart
+  # templates a Namespace itself.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
 
   # Namespaced resource kinds allowed inside the destination namespace.
   # "*"/"*" allows all groups/kinds at the namespace level — reasonable for
