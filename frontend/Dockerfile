@@ -53,14 +53,3 @@ EXPOSE 8080
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
-
-
-
-
-kubectl logs -n ecommerce ecommerce-api-7fbd475769-9k6kk 2>&1 | tail -60 && echo "---EVENTS---" && kubectl describe pod -n ecommerce ecommerce-api-7fbd475769-9k6kk 2>&1 | tail -25
-
-kubectl get pods -n ecommerce
-echo "---CURRENT LOGS---"
-kubectl logs -n ecommerce -l app.kubernetes.io/name=ecommerce-api --tail=100 2>&1
-echo "---PREVIOUS LOGS---"
-kubectl logs -n ecommerce -l app.kubernetes.io/name=ecommerce-api --previous --tail=100 2>&1
