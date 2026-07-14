@@ -1,0 +1,19 @@
+# configmap.yaml
+#
+# Same rationale as k8s/base/configmap.yaml: non-secret config the api pod
+# bulk-loads via envFrom, and the frontend's API_URL. Templatized so
+# dev/prod values files can point CORS/JWT issuer/audience and the API path
+# at different hosts without touching this file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ecommerce-chart.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+data:
+  ASPNETCORE_ENVIRONMENT: {{ .Values.aspnetEnvironment | quote }}
+  Cors__AllowedOrigin: {{ .Values.secrets.corsAllowedOrigin | quote }}
+  Jwt__Issuer: {{ .Values.secrets.jwtIssuer | quote }}
+  Jwt__Audience: {{ .Values.secrets.jwtAudience | quote }}
+  API_URL: {{ .Values.web.apiUrl | quote }}

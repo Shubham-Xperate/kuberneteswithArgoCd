@@ -1,0 +1,34 @@
+# ecommerce-prod environment overlay
+# -----------------------------------
+# This file lives in the (simulated) SEPARATE GitOps repo — see gitops/README.md.
+#
+# Same idea as gitops/apps/ecommerce-dev/values.yaml: slim overlay, only the
+# fields that differ from helm/ecommerce-chart/values.yaml + values-prod.yaml.
+#
+# IMPORTANT DIFFERENCE FROM DEV: this file is NOT bumped automatically on
+# every merge to main. Production promotion is a deliberate, reviewed action:
+#   - the Azure DevOps pipeline's "Update_GitOps_Prod" stage only runs after
+#     the pipeline's `production` Environment approval is granted by a human
+#     (configured in Azure DevOps under Pipelines > Environments > production
+#     > Approvals and checks — see .azuredevops/README.md), OR
+#   - in stricter setups, this file is edited via a pull request against the
+#     GitOps repo that a second person reviews and merges by hand, rather
+#     than letting any pipeline push to it directly.
+#
+# Either way: nobody should expect prod's image tag to change just because
+# someone merged a PR to the app repo's main branch. That's the whole point
+# of the manual gate — a human explicitly decides "yes, promote this build
+# to production, right now."
+api:
+  image:
+    tag: prod-placeholder # bumped only via the approved Update_GitOps_Prod stage / reviewed PR
+
+web:
+  image:
+    tag: prod-placeholder # bumped only via the approved Update_GitOps_Prod stage / reviewed PR
+
+# Example of a genuinely environment-specific (not CI-managed) override:
+# api:
+#   replicaCount: 3
+# web:
+#   replicaCount: 3

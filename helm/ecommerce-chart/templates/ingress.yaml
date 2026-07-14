@@ -1,0 +1,35 @@
+{{/*
+ingress.yaml -- guarded by .Values.ingress.enabled
+
+PREREQUISITE (same as k8s/base/ingress.yaml): the NGINX Ingress Controller
+must already be installed in-cluster (its own Helm chart, `ingress-nginx`)
+for `ingressClassName: nginx` to mean anything. Locally, remember to add
+`.Values.ingress.host` to your hosts file pointing at the controller's IP.
+*/}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ecommerce-chart.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # Dynamically references the web Service's templated name --
+                # this is exactly the kind of coupling that's safe to
+                # template (both live in this same chart, so they can never
+                # drift apart the way a hardcoded name baked into a
+                # different container image could).
+                name: {{ include "ecommerce-chart.fullname" . }}-web
+                port:
+                  number: {{ .Values.web.service.port }}
+{{- end }}

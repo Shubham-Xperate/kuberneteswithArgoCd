@@ -1,0 +1,21 @@
+# web-service.yaml
+#
+# Unlike api-service.yaml, this one IS safe to name via the fullname helper
+# -- nothing outside this chart hardcodes its name; ingress.yaml below
+# references it dynamically through the same helper, so they always agree.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ecommerce-chart.fullname" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "web") | nindent 4 }}
+  ports:
+    - port: {{ .Values.web.service.port }}
+      targetPort: 80
+      name: http

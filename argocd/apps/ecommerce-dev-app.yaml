@@ -1,0 +1,80 @@
+# Child Application: ecommerce-dev
+# ----------------------------------
+# Created automatically by the root "app of apps" Application
+# (argocd/root-app.yaml) because it's a file in argocd/apps/.
+#
+# WHY `sources` (plural) INSTEAD OF `source` (singular):
+# This is one of the more confusing corners of real ArgoCD usage. Normally an
+# Application has a single `spec.source` pointing at one repo/path (e.g. the
+# Helm chart). But here we need to combine TWO things that live at different
+# paths:
+#   1. the Helm CHART itself: helm/ecommerce-chart (templates + Chart.yaml +
+#      default values.yaml — owned by the app-source repo)
+#   2. an extra VALUES FILE that overrides just the image tags:
+#      gitops/apps/ecommerce-dev/values.yaml (owned by the simulated separate
+#      GitOps repo — see gitops/README.md)
+#
+# A single `source` block can only point at one path, so it cannot reference
+# a values file that lives outside the chart's own directory. ArgoCD's
+# "multi-source Applications" feature solves this: `spec.sources` is a list,
+# and one entry can reference another entry via the special `$<ref-name>`
+# syntax in `helm.valueFiles`, letting you pull a values.yaml from a
+# completely different path (or even a different repo) than the chart.
+# That's exactly what we do below: the second `sources` entry (ref: values)
+# checks out the gitops/ path, and the first entry's `helm.valueFiles` points
+# at a file inside that checkout using `$values/...`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ecommerce-dev
+  namespace: argocd
+spec:
+  project: ecommerce
+
+  sources:
+    # Entry 1: the Helm chart itself (templates, Chart.yaml, default values.yaml,
+    # values-dev.yaml — all owned by the app-source repo).
+    - repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+      targetRevision: main
+      path: helm/ecommerce-chart
+      helm:
+        valueFiles:
+          # Chart's own baked-in dev overlay (replica counts, resource limits, etc.)
+          - values-dev.yaml
+          # The GitOps repo's slim overlay containing ONLY the current image
+          # tags. "$values" refers to the second `sources` entry below by its
+          # `ref: values` name — this is the multi-source cross-reference.
+          - $values/gitops/apps/ecommerce-dev/values.yaml
+
+    # Entry 2: same repo (simplification for this lab — see gitops/README.md
+    # and .azuredevops/README.md for why a real setup would make this a
+    # genuinely separate repoURL). Given a `ref` name so entry 1 can point
+    # into it via $values above. This entry contributes no Helm chart itself
+    # — it's checked out purely so its files (the values.yaml) are available
+    # on disk for entry 1 to reference.
+    - repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: ecommerce
+
+  syncPolicy:
+    automated:
+      # prune: true  -> if a resource (e.g. a ConfigMap) is deleted from the
+      # Helm chart's templates in Git, ArgoCD deletes it from the cluster too,
+      # instead of leaving an orphaned resource behind forever.
+      prune: true
+      # selfHeal: true -> if someone runs `kubectl edit deployment ecommerce-api
+      # -n ecommerce` and manually changes a field, ArgoCD detects the drift
+      # from the desired state in Git and automatically reverts it. This is
+      # the heart of GitOps: Git is the single source of truth, and the
+      # cluster is continuously forced back to match it — manual, undocumented
+      # changes never "stick".
+      selfHeal: true
+    syncOptions:
+      # Dev is fully automated end-to-end, so ArgoCD is allowed to create the
+      # "ecommerce" namespace itself the very first time it syncs, rather
+      # than requiring an operator to pre-create it.
+      - CreateNamespace=true

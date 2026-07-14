@@ -1,0 +1,57 @@
+# Root Application — "app of apps" bootstrap
+# --------------------------------------------
+# This is the ONLY Application you apply by hand (or via a one-time bootstrap
+# script). It doesn't deploy the ecommerce app itself — it points at the
+# argocd/apps/ directory in this repo, and ArgoCD treats every *.yaml
+# Application manifest found there as things it should also create and
+# manage. That's the entire "app of apps" trick: one `kubectl apply` (or one
+# ArgoCD-managed Application) bootstraps every child Application below it
+# (ecommerce-dev-app.yaml, ecommerce-prod-app.yaml, and any future ones you
+# add) without you ever having to `kubectl apply` each child manually.
+#
+# It also means this root Application is itself self-managing: if you add a
+# new file to argocd/apps/ and push it, this root Application's own
+# automated sync will notice the new child Application manifest and create
+# it for you automatically (because selfHeal/automated sync applies
+# recursively to whatever this Application's source directory contains).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ecommerce-root
+  namespace: argocd
+  # Prevent this Application from being deleted by an accidental `argocd app
+  # delete --cascade` sweep of everything in the project; it's the root of
+  # the tree.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+
+  source:
+    # Same repo placeholder as argocd/project.yaml — replace with your real URL.
+    repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+    targetRevision: main
+    path: argocd/apps
+
+    # ArgoCD's "directory" source type: apply every plain Kubernetes/ArgoCD
+    # manifest found directly in this path. Since ecommerce-dev-app.yaml and
+    # ecommerce-prod-app.yaml are themselves ArgoCD Application resources,
+    # ArgoCD creates them as new Applications rather than treating them as
+    # app workloads — this is what makes app-of-apps work.
+    directory:
+      recurse: false
+
+  destination:
+    server: "https://kubernetes.default.svc"
+    # The child Applications are the ones that actually deploy into the
+    # "ecommerce" namespace; the Application resources themselves
+    # (this one included) live in the "argocd" namespace alongside ArgoCD's
+    # own control-plane components.
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true # if a child Application file is removed from argocd/apps/, delete that Application too
+      selfHeal: true # if someone manually edits/deletes a child Application in-cluster, revert it to match Git
+    syncOptions:
+      - CreateNamespace=true

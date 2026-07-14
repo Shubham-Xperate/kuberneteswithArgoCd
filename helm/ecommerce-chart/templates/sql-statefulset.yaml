@@ -1,0 +1,89 @@
+{{/*
+sql-statefulset.yaml -- guarded by .Values.sql.enabled
+
+*** LOCAL PRACTICE ONLY -- see the long comment in
+k8s/base/sql-statefulset.yaml for the full rationale, repeated briefly here:
+production (AKS) uses a managed Azure SQL Database over a Private Endpoint,
+provisioned by this project's Terraform, NOT this StatefulSet. Set
+sql.enabled: false (already the case in values-prod.yaml) once you have that
+wired up -- doing so makes this entire file and sql-service.yaml render
+nothing for that release. ***
+*/}}
+{{- if .Values.sql.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "ecommerce-chart.fullname" . }}-sql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sql
+spec:
+  # Governing headless Service name -- must match sql-service.yaml exactly,
+  # which is why both derive it from the same fullname helper + "-sql"
+  # suffix rather than risking two hand-typed strings drifting apart.
+  serviceName: {{ include "ecommerce-chart.fullname" . }}-sql
+  replicas: 1 # always 1 in this lab -- see k8s/base/sql-statefulset.yaml for why scaling this up does NOT give you replication
+  selector:
+    matchLabels:
+      {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "sql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "sql") | nindent 8 }}
+    spec:
+      # NOTE: intentionally no `runAsNonRoot` here, same exception called
+      # out in k8s/base/sql-statefulset.yaml -- the mssql-server image
+      # manages its own internal user/permissions on /var/opt/mssql and
+      # forcing non-root would break its own startup scripts. Acceptable
+      # because this workload never runs in production.
+      containers:
+        - name: sqlserver
+          image: {{ .Values.sql.image | quote }}
+          ports:
+            - containerPort: 1433
+              name: tds
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+            - name: MSSQL_PID
+              value: "Developer"
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.dbSecretName }}
+                  key: sa-password
+          volumeMounts:
+            - name: sql-data
+              mountPath: /var/opt/mssql
+          resources:
+            {{- toYaml .Values.sql.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" -b -o /dev/null
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" -b -o /dev/null
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: sql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.sql.storage }}
+{{- end }}

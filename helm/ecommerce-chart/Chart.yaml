@@ -1,0 +1,20 @@
+# Chart.yaml -- chart metadata (not app config; that's values.yaml)
+apiVersion: v2 # v2 = Helm 3 chart format (supports library charts, more precise dependency conditions, etc.); v1 is Helm 2 legacy
+name: ecommerce-chart
+description: >-
+  Helm chart for the ecommerce-devops-lab teaching project: a .NET 8 Web API
+  behind an Angular + nginx frontend, with an optional in-cluster SQL Server
+  StatefulSet for local practice (disable via sql.enabled=false once pointed
+  at a managed Azure SQL Database in production).
+type: application # "application" (deployable, has no consumers) vs "library" (shared helpers only, not directly installable)
+version: 0.1.0 # CHART version -- bump this on any template/values.yaml schema change, independent of the app's own version
+appVersion: "1.0.0" # the application version this chart currently defaults to deploying (informational + used as default image tag)
+keywords:
+  - ecommerce
+  - dotnet
+  - angular
+  - kubernetes
+  - teaching
+home: https://github.com/example/ecommerce-devops-lab
+maintainers:
+  - name: ecommerce-devops-lab

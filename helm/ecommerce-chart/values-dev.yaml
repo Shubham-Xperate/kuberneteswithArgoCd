@@ -1,0 +1,42 @@
+# values-dev.yaml -- overrides for local kind/minikube practice
+#
+# Usage: helm install ecommerce ./ecommerce-chart -f values.yaml -f values-dev.yaml -n ecommerce --create-namespace
+#
+# Only the keys that actually differ from values.yaml need to appear here --
+# Helm deep-merges this on top of values.yaml, it does not replace it wholesale.
+
+aspnetEnvironment: Development
+
+api:
+  image:
+    tag: dev # floating tag matching whatever your local build/push loop produces
+  replicaCount: 1 # one pod is enough to prove it works on a laptop
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+web:
+  image:
+    tag: dev
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+autoscaling:
+  minReplicas: 1
+  maxReplicas: 2 # a laptop-scale cluster has no real "scale out under load" story to test beyond wiring it up
+
+podDisruptionBudget:
+  enabled: false # nothing to drain on a single-node dev cluster
+
+sql:
+  enabled: true # yes please -- this is exactly what makes dev free and self-contained

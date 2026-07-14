@@ -1,0 +1,39 @@
+# Copy this file to terraform.tfvars and adjust values for your own
+# subscription. terraform.tfvars is gitignored (see terraform/.gitignore)
+# so real values never get committed - only this .example file is tracked.
+
+project     = "ecom"
+environment = "prod"
+location    = "eastus"
+
+vnet_address_space = ["10.0.0.0/16"]
+
+aks_kubernetes_version      = "1.29" # pin explicitly and review upgrades deliberately in prod
+aks_private_cluster_enabled = true
+
+aks_system_node_pool = {
+  vm_size             = "Standard_D4s_v5"
+  node_count          = 3
+  enable_auto_scaling = true
+  min_count           = 3
+  max_count           = 5
+}
+
+aks_user_node_pool = {
+  vm_size             = "Standard_D4s_v5"
+  node_count          = 3
+  enable_auto_scaling = true
+  min_count           = 3
+  max_count           = 10
+  node_labels         = { workload = "app" }
+}
+
+# Placeholder - update once your AKS ingress controller is deployed and has
+# a known internal load balancer IP (or FQDN).
+appgw_backend_address = "10.0.1.100"
+appgw_waf_mode         = "Prevention"
+
+appgw_sku_capacity = {
+  min = 2
+  max = 10
+}

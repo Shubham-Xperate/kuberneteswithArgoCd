@@ -1,0 +1,24 @@
+{{/*
+pdb.yaml -- guarded by .Values.podDisruptionBudget.enabled
+
+Off by default / in values-dev.yaml (a single-node local cluster has nothing
+to "drain" around); on in values-prod.yaml, where AKS node-image
+auto-upgrades and cluster-autoscaler scale-downs routinely evict pods and we
+want a guaranteed floor of healthy API replicas throughout. See the long
+comment in k8s/overlays/prod/pdb.yaml for the full voluntary-vs-involuntary
+disruption explanation -- identical reasoning applies here.
+*/}}
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ecommerce-chart.fullname" . }}-api-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "api") | nindent 6 }}
+{{- end }}

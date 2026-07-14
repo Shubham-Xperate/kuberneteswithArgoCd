@@ -1,0 +1,22 @@
+{{/*
+namespace.yaml
+
+NOTE (divergence from k8s/base): the raw Kustomize manifests hardcode
+`namespace: ecommerce` on every single object because plain kubectl/Kustomize
+has no session-wide "current target namespace" concept baked into the
+manifests themselves. Helm, by contrast, always installs a release INTO a
+specific namespace given via `helm install -n <ns>` (or --create-namespace),
+exposed to every template as `.Release.Namespace`. So every namespaced
+resource in this chart uses `.Release.Namespace` instead of a literal
+"ecommerce" string -- this one Namespace object is the only place we still
+render an actual Namespace resource, and even here we name it FROM
+.Release.Namespace so `helm install ... -n ecommerce --create-namespace`
+and this template stay in agreement no matter what name you choose at
+install time.
+*/}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}

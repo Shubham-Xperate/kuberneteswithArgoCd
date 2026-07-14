@@ -1,0 +1,62 @@
+{{/*
+NOTES.txt is rendered as a template too (not just displayed verbatim) and
+printed to the terminal automatically after `helm install`/`helm upgrade`
+succeeds. It's also re-runnable any time via:
+  helm get notes <release-name> -n <namespace>
+*/}}
+Thanks for installing {{ .Chart.Name }} (release "{{ .Release.Name }}") into namespace "{{ .Release.Namespace }}".
+
+Deployed components:
+  - API   : {{ include "ecommerce-chart.fullname" . }}-api  ({{ .Values.api.replicaCount }} replica(s), image {{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }})
+  - Web   : {{ include "ecommerce-chart.fullname" . }}-web  ({{ .Values.web.replicaCount }} replica(s), image {{ .Values.web.image.repository }}:{{ .Values.web.image.tag | default .Chart.AppVersion }})
+{{- if .Values.sql.enabled }}
+  - SQL   : {{ include "ecommerce-chart.fullname" . }}-sql  (StatefulSet, LOCAL PRACTICE ONLY -- not production-grade, see chart comments)
+{{- else }}
+  - SQL   : disabled (sql.enabled=false) -- expecting a managed Azure SQL Database reachable via the connection string secret
+{{- end }}
+
+--------------------------------------------------------------------------
+HOW TO ACCESS THE APP
+--------------------------------------------------------------------------
+
+Option 1) Quick local check via port-forward (no Ingress needed):
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "ecommerce-chart.fullname" . }}-web {{ .Values.web.service.port }}:{{ .Values.web.service.port }}
+
+  Then open: http://localhost:{{ .Values.web.service.port }}
+
+{{- if .Values.ingress.enabled }}
+
+Option 2) Via the Ingress host (recommended -- exercises the full routing path):
+
+  Prerequisite: the NGINX Ingress Controller must be installed in this
+  cluster first (it is NOT part of this chart):
+    helm upgrade --install ingress-nginx ingress-nginx \
+      --repo https://kubernetes.github.io/ingress-nginx \
+      --namespace ingress-nginx --create-namespace
+
+  1. Add this host to your machine's hosts file, pointing at your local
+     ingress controller's IP (127.0.0.1 for most kind setups, or the output
+     of `minikube ip` for minikube):
+       Windows: C:\Windows\System32\drivers\etc\hosts
+       Linux/Mac: /etc/hosts
+
+       127.0.0.1  {{ .Values.ingress.host }}
+
+  2. Open: http://{{ .Values.ingress.host }}
+{{- else }}
+
+Ingress is currently DISABLED for this release (ingress.enabled=false in
+your values). Use the port-forward option above, or re-install with
+ingress.enabled=true.
+{{- end }}
+
+--------------------------------------------------------------------------
+Check rollout status:
+  kubectl get pods -n {{ .Release.Namespace }} -w
+
+{{- if .Values.autoscaling.enabled }}
+Autoscaling is ENABLED for the API ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas, target {{ .Values.autoscaling.targetCPUUtilizationPercentage }}% CPU).
+This requires metrics-server to be installed in the cluster, or
+`kubectl get hpa -n {{ .Release.Namespace }}` will show <unknown> under TARGETS forever.
+{{- end }}

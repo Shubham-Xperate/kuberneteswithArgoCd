@@ -1,0 +1,33 @@
+{{/*
+hpa.yaml -- guarded by .Values.autoscaling.enabled
+
+Same two hard prerequisites as k8s/base/hpa.yaml: metrics-server installed
+in-cluster, and api.resources.requests.cpu set (it is, by default, in
+values.yaml) -- "70% utilization" is 70% of that request, not of node
+capacity or of the limit. If .Values.autoscaling.enabled is false, this
+renders nothing at all and api.replicaCount becomes a fixed, permanent count
+with no automatic scaling.
+*/}}
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "ecommerce-chart.fullname" . }}-api-hpa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "ecommerce-chart.fullname" . }}-api
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

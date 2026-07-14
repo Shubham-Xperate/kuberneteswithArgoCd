@@ -1,0 +1,27 @@
+{{/*
+sql-service.yaml -- guarded by .Values.sql.enabled
+
+Headless Service (clusterIP: None) so DNS resolves to the individual pod's
+stable identity rather than round-robin load-balancing across replicas --
+required pairing for a StatefulSet, and doubly important for a single-writer
+database where "any pod will do" is the wrong semantic. See
+k8s/base/sql-statefulset.yaml's Service comment for the full explanation.
+*/}}
+{{- if .Values.sql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ecommerce-chart.fullname" . }}-sql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sql
+spec:
+  clusterIP: None
+  selector:
+    {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "sql") | nindent 4 }}
+  ports:
+    - port: 1433
+      targetPort: 1433
+      name: tds
+{{- end }}

@@ -1,0 +1,390 @@
+# =============================================================================
+# Azure DevOps CI pipeline for the ecommerce-devops-lab project
+# =============================================================================
+#
+# WHAT THIS PIPELINE DOES AND DOES NOT DO (read this first)
+# -----------------------------------------------------------------------------
+# This pipeline is the CI ("Continuous Integration") half of a GitOps
+# CI/CD split. Its job stops at:
+#   1. building and testing the .NET API and Angular web app,
+#   2. building and pushing Docker images to Azure Container Registry (ACR),
+#   3. bumping an image tag in the gitops/ folder and committing that change.
+#
+# It NEVER runs `kubectl apply`, `helm upgrade/install`, or anything else
+# that touches the AKS cluster directly. That is deliberate. ArgoCD, running
+# inside the cluster, is the only thing with write access to the cluster,
+# and it works by continuously *pulling* the desired state from Git (the
+# gitops/ folder) rather than having CI *push* changes into it. See
+# gitops/README.md and argocd/README.md for the full explanation of why this
+# "push vs. pull" distinction is a core GitOps principle, and why it's a
+# common trip-up for people used to push-based deploy scripts
+# (e.g. a pipeline task that runs `kubectl set image ...` directly).
+#
+# In short: this file's last responsibility is "make a commit". Everything
+# after that commit lands is ArgoCD's job, not this pipeline's.
+# =============================================================================
+
+trigger:
+  # Only main triggers a full build -> push -> deploy run. Feature branches
+  # get no CI at all here (add branch filters if you want per-branch builds).
+  branches:
+    include:
+      - main
+  paths:
+    # Avoid pointless full pipeline runs when only docs change.
+    exclude:
+      - "**/*.md"
+      - gitops/**  # commits made BY this pipeline (tag bumps) must not retrigger it - see [skip ci] note below
+
+pr:
+  # PR validation trigger: build + test ONLY, never push images or touch
+  # the GitOps repo. This gives fast feedback on PRs without granting PR
+  # branches (which could be from a fork, or from anyone with a branch)
+  # any ability to push images to ACR or write GitOps commits.
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - "**/*.md"
+      - gitops/**
+
+variables:
+  # -- Container registry --
+  acrName: "ecommerceacr" # <-- replace with your real ACR name (must match Terraform output)
+  acrLoginServer: "$(acrName).azurecr.io"
+  apiImageName: "ecommerce-api"
+  webImageName: "ecommerce-web"
+
+  # -- Service connections (configured in Azure DevOps UI, never in YAML) --
+  # An Azure DevOps "service connection" of type "Docker Registry" (ACR
+  # flavor) or "AzureContainerRegistry" stores a Service Principal /
+  # Managed Identity that Azure DevOps uses to authenticate `docker push` to
+  # ACR. This means no ACR username/password/token is ever written into this
+  # YAML file or committed anywhere — the credential lives only inside Azure
+  # DevOps's encrypted service connection store, and the Docker@2 task
+  # exchanges it for a short-lived token at run time.
+  acrServiceConnection: "acr-service-connection" # <-- name of the service connection you create in Project Settings > Service connections
+
+  # -- Image tagging strategy --
+  # We tag every image with the Azure DevOps Build ID ($(Build.BuildId)),
+  # which is a unique, monotonically increasing, IMMUTABLE integer per
+  # pipeline run. This (or a short git commit SHA, which is equally valid
+  # and arguably more traceable back to source) is what makes a good image
+  # tag:
+  #   - immutable: pushing to a tag like ":latest" again silently replaces
+  #     what that tag points to, so two different deploys can end up
+  #     claiming to run "latest" while actually running different code -
+  #     completely defeating rollback and reproducibility.
+  #   - traceable: `docker inspect` or a `kubectl describe pod` on a running
+  #     container immediately tells you exactly which build produced it,
+  #     which you can trace back to an exact commit and pipeline run.
+  #   - required for GitOps: ArgoCD only re-syncs when the *content* of
+  #     values.yaml changes. If every deploy pushed the same ":latest" tag
+  #     string, the GitOps commit would have no diff, and ArgoCD would never
+  #     even notice anything changed!
+  # NEVER use ":latest" as a deployment tag for these reasons - it's a
+  # textbook anti-pattern that this pipeline deliberately avoids.
+  imageTag: "$(Build.BuildId)"
+
+  buildConfiguration: "Release"
+  dotnetSolution: "backend/ECommerce.sln"
+
+stages:
+  # ===========================================================================
+  # STAGE 1: Build_And_Test
+  # Runs on EVERY trigger (main pushes AND pull requests). Two independent
+  # jobs run in parallel (no dependsOn between them) since the .NET API and
+  # Angular web app are entirely separate toolchains and don't need to wait
+  # on each other - this shortens overall pipeline wall-clock time.
+  # ===========================================================================
+  - stage: Build_And_Test
+    displayName: "Build & Test (API + Web)"
+    jobs:
+      # ----- Job A: .NET 8 Web API -----
+      - job: Build_Test_Api
+        displayName: "Build & Test .NET API"
+        pool:
+          vmImage: "ubuntu-latest" # Microsoft-hosted agent - no self-hosted infra to maintain for this lab
+        steps:
+          - task: UseDotNet@2
+            displayName: "Install .NET 8 SDK"
+            inputs:
+              packageType: "sdk"
+              version: "8.x"
+
+          - script: dotnet restore "$(dotnetSolution)"
+            displayName: "dotnet restore"
+
+          - script: dotnet build "$(dotnetSolution)" --configuration $(buildConfiguration) --no-restore
+            displayName: "dotnet build"
+
+          - script: >
+              dotnet test "$(dotnetSolution)"
+              --configuration $(buildConfiguration)
+              --no-build
+              --logger trx
+              --results-directory "$(Agent.TempDirectory)/testresults"
+            displayName: "dotnet test"
+
+          - task: PublishTestResults@2
+            displayName: "Publish .NET test results"
+            condition: succeededOrFailed() # publish results even if some tests failed, so the pipeline UI shows what broke
+            inputs:
+              testResultsFormat: "VSTest"
+              testResultsFiles: "*.trx"
+              searchFolder: "$(Agent.TempDirectory)/testresults"
+              failTaskOnFailedTests: true
+              testRunTitle: "ECommerce.Api tests"
+
+      # ----- Job B: Angular Web App -----
+      - job: Build_Test_Web
+        displayName: "Build & Test Angular Web"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: NodeTool@0
+            displayName: "Install Node.js"
+            inputs:
+              versionSpec: "20.x"
+
+          - script: npm ci
+            displayName: "npm ci"
+            workingDirectory: frontend
+
+          # Production build - same build the Docker image will bake in later,
+          # run here too so a build-breaking change fails fast in CI before
+          # we ever get to the Docker stage.
+          - script: npm run build -- --configuration production
+            displayName: "npm run build (production)"
+            workingDirectory: frontend
+
+          # Headless Chrome unit tests via Karma/Jasmine (Angular CLI default).
+          # Guarded with `continue-on-target-missing`-style tolerance isn't a
+          # real Azure Pipelines feature, so instead we just document the
+          # assumption: if frontend/package.json has no "test" script yet,
+          # remove/comment this step. As written, this assumes ChromeHeadless
+          # is available, which is why we install it explicitly below.
+          - script: |
+              npx --no-install ng test --watch=false --browsers=ChromeHeadless --code-coverage || \
+              npm test -- --watch=false --browsers=ChromeHeadless
+            displayName: "npm test (ChromeHeadless, single run)"
+            workingDirectory: frontend
+            env:
+              CHROME_BIN: /usr/bin/google-chrome # ubuntu-latest Microsoft-hosted images ship Chrome preinstalled
+
+          - task: PublishTestResults@2
+            displayName: "Publish Angular test results"
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "frontend/test-results/*.xml" # configure karma.conf.js's junit reporter to write here
+              failTaskOnFailedTests: false # non-blocking until the junit reporter is wired up by the app team; flip to true once confirmed
+
+  # ===========================================================================
+  # STAGE 2: Build_And_Push_Images
+  # Only runs for main branch builds (never for PRs - see the `condition`
+  # below, which checks Build.Reason so a PR run of this same YAML file skips
+  # straight past this stage). Builds both Docker images and pushes them to
+  # ACR, authenticating via the pre-configured service connection - no
+  # credentials of any kind appear in this file.
+  # ===========================================================================
+  - stage: Build_And_Push_Images
+    displayName: "Build & Push Docker Images to ACR"
+    dependsOn: Build_And_Test
+    condition: >
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        ne(variables['Build.Reason'], 'PullRequest')
+      )
+    jobs:
+      - job: Push_Api_Image
+        displayName: "Build & Push ecommerce-api image"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: Docker@2
+            displayName: "Build & push ecommerce-api"
+            inputs:
+              # containerRegistry references the Azure DevOps SERVICE
+              # CONNECTION by name (type: Docker Registry / Azure Container
+              # Registry). Under the hood this resolves to a Service
+              # Principal or Managed Identity with AcrPush role on the
+              # registry - `docker login` happens automatically using a
+              # short-lived token Azure DevOps requests at run time. There is
+              # no username/password in this repo, ever.
+              containerRegistry: "$(acrServiceConnection)"
+              repository: "$(apiImageName)"
+              command: "buildAndPush"
+              Dockerfile: "backend/Dockerfile"
+              buildContext: "backend"
+              tags: |
+                $(imageTag)
+
+      - job: Push_Web_Image
+        displayName: "Build & Push ecommerce-web image"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: Docker@2
+            displayName: "Build & push ecommerce-web"
+            inputs:
+              containerRegistry: "$(acrServiceConnection)"
+              repository: "$(webImageName)"
+              command: "buildAndPush"
+              Dockerfile: "frontend/Dockerfile"
+              buildContext: "frontend"
+              tags: |
+                $(imageTag)
+
+  # ===========================================================================
+  # STAGE 3: Update_GitOps_Dev
+  # This is the moment ArgoCD picks up a new deploy for DEV. Notice this
+  # stage does NOT touch the cluster - it only edits a file and commits.
+  # Dev auto-deploys on every main build, which is normal/desirable for a
+  # dev environment (fast feedback, no approval overhead).
+  #
+  # TEACHING-REPO SIMPLIFICATION: in a real split-repo GitOps setup (see
+  # gitops/README.md), this stage would need to:
+  #   - check out a SEPARATE repo (e.g. "ecommerce-gitops") using its own
+  #     Git-type service connection or a PAT stored as a secret variable,
+  #     since the pipeline's default checkout token only has write access to
+  #     the repo the pipeline itself lives in;
+  #   - clone/push to that repo's own remote URL.
+  # For this lab, gitops/ is just a folder in the SAME repo/checkout, so we
+  # reuse the pipeline's own default `checkout: self` and push back to the
+  # same repo. This is called out explicitly so nobody mistakes this
+  # simplification for a real-world recommendation.
+  # ===========================================================================
+  - stage: Update_GitOps_Dev
+    displayName: "Update GitOps repo (dev)"
+    dependsOn: Build_And_Push_Images
+    condition: succeeded()
+    jobs:
+      - job: Bump_Dev_Tags
+        displayName: "Bump dev image tags & commit"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - checkout: self
+            persistCredentials: true # allows the script below to `git push` back using the pipeline's own OAuth token
+            fetchDepth: 0 # need full history (not a shallow clone) to push a normal commit cleanly
+
+          - script: |
+              set -euo pipefail
+              sudo snap install yq
+            displayName: "Install yq (YAML editor)"
+
+          - script: |
+              set -euo pipefail
+              VALUES_FILE="gitops/apps/ecommerce-dev/values.yaml"
+
+              # yq -i edits the file in place. We target the exact fields the
+              # Helm chart expects: api.image.tag and web.image.tag.
+              yq -i ".api.image.tag = \"$(imageTag)\"" "$VALUES_FILE"
+              yq -i ".web.image.tag = \"$(imageTag)\"" "$VALUES_FILE"
+
+              echo "----- updated $VALUES_FILE -----"
+              cat "$VALUES_FILE"
+            displayName: "Bump api/web image.tag in gitops/apps/ecommerce-dev/values.yaml"
+
+          - script: |
+              set -euo pipefail
+              git config user.email "devops-bot@ecommerce-lab.local"
+              git config user.name "ecommerce-devops-bot"
+
+              git add gitops/apps/ecommerce-dev/values.yaml
+
+              # [skip ci] (recognized by Azure Pipelines as [skip ci] or
+              # ***NO_CI***) prevents THIS commit from retriggering the
+              # pipeline's own `trigger:` again, which would otherwise cause
+              # an infinite build loop (bot commits a tag bump -> triggers a
+              # new build -> which pushes new images -> which bumps the tag
+              # again -> ...). We also excluded gitops/** from `trigger.paths`
+              # above as a second, belt-and-suspenders safeguard - either one
+              # alone would be enough, but real pipelines commonly use both.
+              git commit -m "ci: bump dev image tags to $(imageTag) [skip ci]" --allow-empty
+
+              git push origin HEAD:main
+            displayName: "Commit & push tag bump (bot identity, [skip ci])"
+
+  # ===========================================================================
+  # STAGE 4: Update_GitOps_Prod
+  # Same tag-bump mechanism as dev, but gated behind an Azure DevOps
+  # ENVIRONMENT named "production" with a manual approval check.
+  #
+  # IMPORTANT: the actual approval rule (who can approve, how many
+  # approvers, timeout, etc.) is NOT expressed in this YAML file - it is
+  # configured in the Azure DevOps web UI under:
+  #   Pipelines > Environments > production > Approvals and checks
+  # The `environment: 'production'` reference below is what makes Azure
+  # Pipelines pause this deployment job and wait for that UI-configured
+  # approval before any step in it runs. This YAML is only the "hook" the
+  # approval attaches to; you must configure the approvers separately, once,
+  # per project (see .azuredevops/README.md).
+  # ===========================================================================
+  - stage: Update_GitOps_Prod
+    displayName: "Update GitOps repo (prod) — requires approval"
+    dependsOn: Build_And_Push_Images
+    condition: succeeded()
+    jobs:
+      # `deployment` jobs (as opposed to plain `job`) are the construct that
+      # understands `environment:` and therefore enforces
+      # Environment-level approvals/checks before running its steps.
+      - deployment: Bump_Prod_Tags
+        displayName: "Bump prod image tags & commit (after approval)"
+        environment: "production" # <-- must be created once under Pipelines > Environments, with an Approvals check added
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          # `runOnce` is the simplest deployment strategy - just run the
+          # steps once per deployment, no canary/rolling semantics needed
+          # here since the "deployment" is really just a Git commit, not a
+          # live rollout (that part is ArgoCD's job, and ArgoCD's prod
+          # Application also requires its own separate manual `argocd app
+          # sync` - see argocd/apps/ecommerce-prod-app.yaml).
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  persistCredentials: true
+                  fetchDepth: 0
+
+                - script: |
+                    set -euo pipefail
+                    sudo snap install yq
+                  displayName: "Install yq (YAML editor)"
+
+                - script: |
+                    set -euo pipefail
+                    VALUES_FILE="gitops/apps/ecommerce-prod/values.yaml"
+
+                    yq -i ".api.image.tag = \"$(imageTag)\"" "$VALUES_FILE"
+                    yq -i ".web.image.tag = \"$(imageTag)\"" "$VALUES_FILE"
+
+                    echo "----- updated $VALUES_FILE -----"
+                    cat "$VALUES_FILE"
+                  displayName: "Bump api/web image.tag in gitops/apps/ecommerce-prod/values.yaml"
+
+                - script: |
+                    set -euo pipefail
+                    git config user.email "devops-bot@ecommerce-lab.local"
+                    git config user.name "ecommerce-devops-bot"
+
+                    git add gitops/apps/ecommerce-prod/values.yaml
+
+                    # Same [skip ci] rationale as the dev stage above: this
+                    # bot commit must not retrigger the pipeline.
+                    git commit -m "ci: promote prod image tags to $(imageTag) [skip ci]" --allow-empty
+
+                    git push origin HEAD:main
+                  displayName: "Commit & push tag bump (bot identity, [skip ci])"
+
+                # Reminder step (no-op) making the remaining manual gate explicit
+                # in the pipeline's log output for anyone reading it later.
+                - script: |
+                    echo "Prod values.yaml updated. ArgoCD will show 'ecommerce-prod' as OutOfSync."
+                    echo "A human must now run 'argocd app sync ecommerce-prod' (or use the ArgoCD UI) to actually roll this out."
+                    echo "This second, separate manual step is intentional - see argocd/apps/ecommerce-prod-app.yaml."
+                  displayName: "Reminder: manual ArgoCD sync still required"

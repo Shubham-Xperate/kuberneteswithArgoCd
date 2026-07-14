@@ -1,0 +1,126 @@
+# =============================================================================
+# values.yaml -- default configuration for the ecommerce-chart
+# =============================================================================
+# These are BASE DEFAULTS. Environment-specific overrides live in
+# values-dev.yaml / values-prod.yaml and are layered on top at install time:
+#   helm install ecommerce ./ecommerce-chart -f values.yaml -f values-dev.yaml -n ecommerce --create-namespace
+# (Helm merges later -f files over earlier ones, so values-dev.yaml only
+# needs to list the keys that actually differ from this file.)
+
+# namespace this release's resources are created in. Note: with Helm, you
+# normally set the namespace via `helm install -n <ns>` / `--create-namespace`
+# and templates reference `.Release.Namespace`, rather than hardcoding it
+# like the raw k8s/base manifests do -- see templates/namespace.yaml for the
+# NOTE explaining this divergence from k8s/base.
+namespace: ecommerce
+
+api:
+  image:
+    repository: youracr.azurecr.io/ecommerce-api # ACR path the API image lives at; swap the registry host per-environment if needed
+    tag: latest # overridden by values-dev.yaml (dev) / values-prod.yaml (pinned semver) -- base default intentionally floats
+    pullPolicy: IfNotPresent # avoid re-pulling on every pod restart; use "Always" for floating tags like `latest`/`dev` if you need guaranteed freshness
+  replicaCount: 2 # how many API pods to run; dev overrides to 1, prod to 3
+  resources:
+    # requests: what the scheduler reserves + the denominator HPA's target
+    # percentage is computed against. limits: hard ceiling enforced by the
+    # kernel (memory limit breach = OOMKill, cpu limit breach = throttling).
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    port: 8080 # MUST stay 8080 -- the frontend nginx.conf hardcodes proxy_pass to this exact port on the ecommerce-api Service name
+
+web:
+  image:
+    repository: youracr.azurecr.io/ecommerce-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2 # dev -> 1, prod -> 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  service:
+    port: 80
+  # Consumed by the web image's docker-entrypoint.sh to regenerate
+  # assets/env.js at container start -- lets one built image work against
+  # different API paths/hosts per environment without a rebuild.
+  apiUrl: /api
+
+ingress:
+  enabled: true # set false if you only want to reach the app via port-forward / a different ingress mechanism
+  host: ecommerce.local # requires an /etc/hosts entry locally; becomes a real DNS name (e.g. shop.example.com) in production
+  className: nginx # must match an IngressClass actually installed in-cluster (the ingress-nginx Helm chart is a prerequisite -- see NOTES.txt)
+
+autoscaling:
+  enabled: true # if false, hpa.yaml's template renders nothing and replicaCount above is the fixed, permanent pod count
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70 # % of api.resources.requests.cpu -- REQUIRES metrics-server installed in-cluster or this has no effect
+
+podDisruptionBudget:
+  enabled: false # dev clusters have nothing to "drain"; values-prod.yaml turns this on
+  minAvailable: 2
+
+# -----------------------------------------------------------------------------
+# secrets -- DO NOT PUT REAL VALUES HERE.
+# -----------------------------------------------------------------------------
+# This whole values.yaml is expected to be committed to git as a template.
+# The placeholders below exist only so `helm template`/`helm lint` render
+# without crashing on missing values, and so the shape of what's needed is
+# obvious to a new reader.
+#
+# For real deployments, supply real values one of these ways (safest to
+# riskiest, roughly in order of "how production-grade this project is"):
+#   1. (BEST, production/AKS): don't use Helm-managed secrets at all -- rely
+#      on the Secrets Store CSI Driver + Azure Key Vault. The project's
+#      Terraform (owned by the platform/infra agent) already provisions AKS
+#      with an AAD Workload Identity federated to the cluster's OIDC issuer
+#      specifically so pods can pull secrets straight from Key Vault with no
+#      plaintext ever touching a `helm install` command or values file.
+#      With that model, set secrets.create=false here and pre-create the
+#      Kubernetes Secret objects (or SecretProviderClass) out-of-band.
+#   2. A separate `values-secrets.yaml` file that is listed in .gitignore
+#      and passed as one more `-f values-secrets.yaml` at install time --
+#      never committed, lives only on the operator's machine or in a CI
+#      secret store.
+#   3. `--set secrets.jwtKey=... --set secrets.dbPassword=...` on the CLI
+#      for one-off local testing (shows up in shell history -- least safe).
+secrets:
+  create: true # if false, the chart assumes Secrets named below already exist in-cluster (created by kubectl, CSI driver, external-secrets, etc.) and skips templating them
+  dbSecretName: ecommerce-db-secret
+  apiSecretName: ecommerce-api-secret
+  # PLACEHOLDERS. Overwrite via --set or a git-ignored values-secrets.yaml,
+  # never by editing real values into this tracked file.
+  dbPassword: "CHANGE_ME_Str0ngP@ssw0rd!"
+  jwtKey: "CHANGE_ME_use_a_long_random_32+_byte_string"
+  jwtIssuer: "https://ecommerce.local"
+  jwtAudience: "https://ecommerce.local"
+  corsAllowedOrigin: "http://ecommerce.local"
+
+# In-cluster SQL Server StatefulSet for LOCAL PRACTICE ONLY. Production sets
+# sql.enabled=false in values-prod.yaml and points api.connectionString
+# (via the secrets section's connection string, built from sql.host once
+# sql is disabled you'd instead inject a full connection string secret
+# pointing at Azure SQL) at a managed Azure SQL Database reached over a
+# Private Endpoint instead. See templates/sql-statefulset.yaml for the full
+# rationale.
+sql:
+  enabled: true
+  image: mcr.microsoft.com/mssql/server:2022-latest
+  storage: 5Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+aspnetEnvironment: Production # ASPNETCORE_ENVIRONMENT; values-dev.yaml sets "Development"

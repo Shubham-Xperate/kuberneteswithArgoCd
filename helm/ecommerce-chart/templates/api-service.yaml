@@ -1,0 +1,32 @@
+# api-service.yaml
+#
+# NOTE (deliberate divergence from the fullname-prefixing pattern used
+# everywhere else in this chart): every other resource here is named
+# `{{ include "ecommerce-chart.fullname" . }}-<thing>` so multiple releases
+# don't collide. This Service is a documented EXCEPTION: the frontend
+# image's nginx.conf has `proxy_pass http://ecommerce-api:8080;` BAKED IN at
+# image-build time (it's not templated, not an env var -- it's a literal
+# string in a config file inside the ecommerce-web container image). If this
+# Service's name were templated to e.g. "myrelease-ecommerce-chart-api", the
+# frontend's nginx would fail to resolve it and every /api/ call would break
+# with a DNS resolution error.
+#
+# Practical implication: install this chart at most ONCE per namespace (which
+# is already the normal expectation for an application chart like this, as
+# opposed to a library/sidecar chart you might install many times).
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "api") | nindent 4 }}
+  ports:
+    - port: {{ .Values.api.service.port }}
+      targetPort: {{ .Values.api.service.port }}
+      name: http

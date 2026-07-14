@@ -1,0 +1,61 @@
+# Child Application: ecommerce-prod
+# ------------------------------------
+# Same shape as ecommerce-dev-app.yaml (see that file's comments for the full
+# explanation of why `sources` (plural) + the `$values` ref trick is needed
+# to combine the Helm chart path with the GitOps repo's values file path).
+#
+# THE KEY DIFFERENCE: `syncPolicy.automated` is OMITTED entirely.
+#
+# Without `automated`, ArgoCD will still detect drift between Git and the
+# live cluster state (the Application shows status "OutOfSync" in the UI/CLI)
+# but it will NOT act on that drift by itself. A human (or a controlled
+# automation step with its own approval, e.g. a follow-up pipeline stage that
+# calls `argocd app sync ecommerce-prod` after a change-management sign-off)
+# must explicitly run:
+#   argocd app sync ecommerce-prod
+# or click "Sync" in the ArgoCD UI.
+#
+# This mirrors the pipeline-side manual approval gate in
+# .azuredevops/azure-pipelines.yml (the `production` Environment with
+# required approvals before Update_GitOps_Prod even commits the new tag).
+# Between the two gates — approval before the tag bump, and manual sync
+# before the cluster actually changes — production deployments require two
+# deliberate human actions, never happen "automatically" just because main
+# was merged, and can't accidentally self-heal away a hotfix someone applied
+# manually while a real incident is being triaged (self-heal is off here too,
+# for the same reason).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ecommerce-prod
+  namespace: argocd
+spec:
+  project: ecommerce
+
+  sources:
+    - repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+      targetRevision: main
+      path: helm/ecommerce-chart
+      helm:
+        valueFiles:
+          - values-prod.yaml
+          - $values/gitops/apps/ecommerce-prod/values.yaml
+
+    - repoURL: "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: ecommerce
+
+  # No `syncPolicy.automated` block: sync must be triggered manually
+  # (`argocd app sync ecommerce-prod` or the ArgoCD UI "Sync" button) by an
+  # operator, after the Update_GitOps_Prod pipeline stage's approval gate has
+  # already bumped the tag in Git. Automated prune/selfHeal are deliberately
+  # NOT enabled for prod.
+  syncPolicy:
+    syncOptions:
+      # Still safe/useful to keep even without automated sync: the very
+      # first manual sync can create the namespace if it doesn't exist yet.
+      - CreateNamespace=true

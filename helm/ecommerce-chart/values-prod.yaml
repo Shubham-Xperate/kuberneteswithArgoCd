@@ -1,0 +1,57 @@
+# values-prod.yaml -- overrides for AKS production
+#
+# Usage: helm install ecommerce ./ecommerce-chart -f values.yaml -f values-prod.yaml -n ecommerce --create-namespace
+#
+# IMPORTANT: this file still contains PLACEHOLDER secret-shaped values
+# (inherited from values.yaml, not overridden here) -- a real production
+# rollout must supply real secrets via --set / a git-ignored
+# values-secrets.yaml / (preferably) the Key Vault CSI driver with
+# secrets.create=false, NOT by editing real credentials into this
+# git-tracked file. See the `secrets:` block in values.yaml for the full
+# explanation of the three supported approaches.
+
+aspnetEnvironment: Production
+
+api:
+  image:
+    tag: "1.0.0" # pinned semantic version -- prod never uses a floating tag; bump this deliberately (e.g. via a PR) for each release
+    pullPolicy: IfNotPresent
+  replicaCount: 3 # real redundancy: survive one pod/node loss with 2 still serving
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+web:
+  image:
+    tag: "1.0.0"
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+ingress:
+  host: ecommerce.example.com # replace with the real production DNS name once you own one; ecommerce.local only resolves on developer laptops
+
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 6
+
+podDisruptionBudget:
+  enabled: true # AKS node image auto-upgrades and cluster-autoscaler scale-downs are routine in prod -- always protect availability during those
+  minAvailable: 2
+
+# Production does NOT run the in-cluster SQL Server StatefulSet: a real
+# managed Azure SQL Database (provisioned by this project's Terraform,
+# reached over a Private Endpoint inside the AKS VNet) replaces it entirely.
+# Disabling this means templates/sql-statefulset.yaml and
+# templates/sql-service.yaml render nothing for this release.
+sql:
+  enabled: false

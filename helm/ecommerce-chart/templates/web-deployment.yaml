@@ -1,0 +1,56 @@
+# web-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ecommerce-chart.fullname" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecommerce-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ecommerce-chart.componentSelectorLabels" (dict "context" . "component" "web") | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: web
+          image: "{{ .Values.web.image.repository }}:{{ .Values.web.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.web.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            # Read from the ConfigMap (not directly from .Values here) so
+            # `kubectl edit configmap` in a pinch, or a future switch to a
+            # different config source, doesn't require also touching this
+            # Deployment -- single source of truth for the value at runtime.
+            - name: API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ecommerce-chart.fullname" . }}-config
+                  key: API_URL
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3

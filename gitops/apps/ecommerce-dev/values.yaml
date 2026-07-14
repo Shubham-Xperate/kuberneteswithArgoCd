@@ -1,0 +1,32 @@
+# ecommerce-dev environment overlay
+# ---------------------------------
+# This file lives in the (simulated) SEPARATE GitOps repo — see gitops/README.md.
+#
+# It is intentionally slim: it does NOT duplicate the whole helm/ecommerce-chart
+# values structure. It only overrides the fields that change on every deploy
+# (the image tags) plus anything genuinely environment-specific for dev.
+# Everything else (replica counts, resource requests, ingress rules, etc.) is
+# inherited from helm/ecommerce-chart/values.yaml and values-dev.yaml, which
+# stay in the app-source repo because they describe "how the app is shaped",
+# not "what's currently deployed".
+#
+# THE ONLY THING THAT CHANGES ON A NORMAL DEV DEPLOY IS THE image.tag FIELDS
+# BELOW. The Azure DevOps pipeline's "Update_GitOps_Dev" stage bumps these two
+# values and commits — that commit is what ArgoCD notices and syncs. Nothing
+# else in this file should need to change for a routine deploy.
+#
+# Starting values are placeholders; the pipeline overwrites them on first run.
+api:
+  image:
+    tag: dev-latest # bumped by CI to $(Build.BuildId) (or short git SHA) on every merge to main
+
+web:
+  image:
+    tag: dev-latest # bumped by CI to $(Build.BuildId) (or short git SHA) on every merge to main
+
+# Example of a genuinely environment-specific (not CI-managed) override that
+# could live here too — dev typically runs with a single replica to save cost:
+# api:
+#   replicaCount: 1
+# web:
+#   replicaCount: 1

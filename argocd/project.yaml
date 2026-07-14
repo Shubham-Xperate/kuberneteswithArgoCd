@@ -1,0 +1,72 @@
+# ArgoCD AppProject: ecommerce
+# -----------------------------
+# An AppProject is ArgoCD's RBAC/scoping boundary. Without one, every
+# Application in the cluster is created in the built-in "default" project,
+# which by default allows any source repo, any destination cluster/namespace,
+# and any Kubernetes resource kind. That is way too permissive for anything
+# beyond a quick demo.
+#
+# Here we scope the ecommerce project down to:
+#   - exactly one source repo (this project's repo — replace the placeholder
+#     URL with your real Azure DevOps / GitHub URL when you fork this lab)
+#   - exactly one destination namespace ("ecommerce") on the in-cluster API
+#     server
+#   - cluster-scoped resources are NOT whitelisted below, so this project
+#     cannot create things like ClusterRoles or Namespaces cluster-wide
+#     (namespace creation for "ecommerce" itself is instead handled via each
+#     Application's syncOptions: CreateNamespace=true, which ArgoCD permits
+#     as a special case)
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ecommerce
+  namespace: argocd
+spec:
+  description: >-
+    Ecommerce app project — scopes which Git repos, destination clusters/namespaces,
+    and resource kinds the ecommerce-dev and ecommerce-prod Applications are allowed to use.
+
+  # Only Applications whose spec.source(s).repoURL matches an entry here are
+  # allowed to be associated with this project. Replace this placeholder with
+  # your actual repo URL (the same repo that contains helm/ and gitops/, per
+  # this lab's simplification of colocating the "app" and "gitops" repos).
+  sourceRepos:
+    - "https://dev.azure.com/your-org/ecommerce-devops-lab/_git/ecommerce-devops-lab"
+    # If you split gitops/ out into a truly separate repo (see gitops/README.md),
+    # add its URL here too, e.g.:
+    # - "https://dev.azure.com/your-org/ecommerce-gitops/_git/ecommerce-gitops"
+
+  # Only these (destination cluster server URL, namespace) pairs may be
+  # targeted by Applications in this project. "https://kubernetes.default.svc"
+  # is the special in-cluster API server address (ArgoCD running inside the
+  # same AKS cluster it manages, which is the common setup for this lab).
+  destinations:
+    - server: "https://kubernetes.default.svc"
+      namespace: ecommerce
+
+  # Whitelist of cluster-scoped resource kinds this project's Applications
+  # may manage. Left empty/omitted here on purpose: this project only ever
+  # touches namespaced resources (Deployments, Services, Ingresses, etc. —
+  # all allowed by default at the namespace scope), so we do not need to
+  # grant any cluster-scoped kinds. This keeps the blast radius of a
+  # compromised or misconfigured Application limited to the "ecommerce"
+  # namespace.
+  clusterResourceWhitelist: []
+
+  # Namespaced resource kinds allowed inside the destination namespace.
+  # "*"/"*" allows all groups/kinds at the namespace level — reasonable for
+  # a teaching project; lock this down further (e.g. explicit Deployment,
+  # Service, ConfigMap, Secret, Ingress entries) in a real production project.
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # Roles below grant human/CI access to this project via ArgoCD RBAC.
+  # Left minimal for the lab; extend with `groups:` mapped to your SSO/AAD
+  # groups in a real deployment.
+  roles:
+    - name: readonly
+      description: Read-only access to ecommerce Applications (view sync status, logs, diffs)
+      policies:
+        - p, proj:ecommerce:readonly, applications, get, ecommerce/*, allow
+      groups: []
